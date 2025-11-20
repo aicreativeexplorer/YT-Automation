@@ -1,1 +1,4 @@
 UPLOADED_VIDEO=/mnt/data/Kling AI- Next-Gen AI Video & AI Image Generator.mp4
+DRIVE_TOKEN_PATH=/content/drive/MyDrive/AI-Automation/hf_token.txt
+OUTPUT_DRIVE_FOLDER=/content/drive/MyDrive/AI-Automation/outputs/stitched
+CHECKPOINT_DRIVE_FOLDER=/content/drive/MyDrive/AI-Automation/checkpoints
