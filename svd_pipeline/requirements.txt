@@ -1,1 +1,14 @@
+kornia
+open_clip_torch
+timm
+transformers
+safetensors
+accelerate
+pytorch-lightning
+fire
+gradio==3.34.0
+omegaconf
+einops
+imageio-ffmpeg
+imwatermark
 
