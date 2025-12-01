@@ -3,45 +3,37 @@ import threading, subprocess, uuid, os, json, time
 import requests # Required for the keepalive ping
 import datetime # Required for timestamping the keepalive log
 
+# The Jugaad Import
+from asgiref.wsgi import WsgiToAsgi 
+
 app = Flask(__name__)
 WORKDIR = os.path.abspath('work'); os.makedirs(WORKDIR, exist_ok=True)
 jobs = {}
 
 # ==========================================
-# KEEPALIVE IMPLEMENTATION
+# KEEPALIVE IMPLEMENTATION (Integrated)
 # ==========================================
 def run_keepalive():
     """Pings the server's own URL every 10 minutes to prevent Render from sleeping."""
-    
-    # Give the main server process time to fully start
     time.sleep(30)
-    
-    # Read the necessary environment variable
     url = os.environ.get("RENDER_EXTERNAL_URL")
-    
     if not url:
-        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ⚠️ KEEPALIVE ERROR: RENDER_EXTERNAL_URL environment variable is not set. Service may sleep.")
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ⚠️ KEEPALIVE ERROR: RENDER_EXTERNAL_URL is not set. Service may sleep.")
         return
 
-    # Render sleeps after 15 mins, so 10 mins (600 seconds) is a safe interval.
     interval_seconds = 600
     print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ✅ KEEPALIVE STARTED. Pinging {url} every 10 minutes.")
     
     while True:
         try:
-            # Wait for the interval
             time.sleep(interval_seconds) 
-            
-            # Use a specific path if available, or just the root '/'
             ping_url = f"{url}/" 
             response = requests.get(ping_url, timeout=10)
-            
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 🔄 Ping sent. Status: {response.status_code}")
             
         except Exception as e:
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ⚠️ KEEPALIVE FAILED: {e}")
 
-# Start the keepalive logic in a new background thread
 threading.Thread(target=run_keepalive, daemon=True).start()
 # ==========================================
 # END KEEPALIVE IMPLEMENTATION
@@ -87,6 +79,13 @@ def api_generate():
 @app.route('/api/job/<jobid>', methods=['GET'])
 def api_job(jobid):
     return jsonify(jobs.get(jobid, {'status':'notfound'}))
+
+# =================================
+# THE JUGAAD: Adapt Flask (WSGI) to look like ASGI
+# The variable name "application" or "asgi_app" is what many ASGI runners look for by default.
+# =================================
+asgi_app = WsgiToAsgi(app)
+
 
 if __name__ == '__main__':
     # debug mode fine for local/Grok/Colab testing
