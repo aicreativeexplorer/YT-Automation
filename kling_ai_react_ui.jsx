@@ -19,7 +19,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { CloudUpload, Play, Download, Settings, Trash2, FilePlus } from 'lucide-react'
 
 // ---------- NETWORK / BACKEND HOOKS (real) ----------
-const API_BASE = "https://armstrong-cancer-composed-server.trycloudflare.com"; // <- set your backend public URL here
+const API_BASE = "https://yt-automation-mt1d.onrender.com"; // <- set your backend public URL here
 
 // Real generate: POST form (prompt, mode, duration, file optional) => { jobId }
 async function realGenerate({ prompt, mode, duration, file }) {
