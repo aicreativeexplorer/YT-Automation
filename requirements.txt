@@ -3,10 +3,6 @@ uvicorn
 python-multipart
 aiofiles
 
-# REMOVE version pins to ensure compatibility with Python 3.13 on Render
-torch
-torchvision
-
 diffusers
 transformers
 accelerate
@@ -20,4 +16,5 @@ ffmpeg-python
 google-auth
 google-auth-oauthlib
 google-api-python-client
+
 
