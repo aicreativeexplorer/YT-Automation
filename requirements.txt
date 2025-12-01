@@ -3,6 +3,9 @@ uvicorn
 asgiref
 requests
 python-multipart
+flask
+redis
+rq
 aiofiles
 diffusers
 transformers
@@ -17,3 +20,4 @@ google-auth-oauthlib
 google-api-python-client
 torch==2.9.1
 torchvision==0.24.1
+
