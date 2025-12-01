@@ -3,7 +3,7 @@ uvicorn
 python-multipart
 aiofiles
 
-torch==2.1.2
+torch>=2.5.0
 torchvision==0.16.2
 
 diffusers
@@ -19,3 +19,4 @@ ffmpeg-python
 google-auth
 google-auth-oauthlib
 google-api-python-client
+
