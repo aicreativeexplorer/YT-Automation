@@ -1,5 +1,6 @@
 gunicorn
 python-multipart
+requests
 fastapi
 uvicorn
 python-multipart
@@ -18,6 +19,7 @@ ffmpeg-python
 google-auth
 google-auth-oauthlib
 google-api-python-client
+
 
 
 
