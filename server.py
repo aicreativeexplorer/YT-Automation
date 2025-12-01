@@ -1,10 +1,10 @@
 from flask import Flask, request, jsonify
 import threading, subprocess, uuid, os, json, time
-import requests # Required for the keepalive ping
-import datetime # Required for timestamping the keepalive log
+import requests  # Required for the keepalive ping
+import datetime  # Required for timestamping the keepalive log
 
 # The Jugaad Import
-from asgiref.wsgi import WsgiToAsgi 
+from asgiref.wsgi import WsgiToAsgi
 
 app = Flask(__name__)
 WORKDIR = os.path.abspath('work'); os.makedirs(WORKDIR, exist_ok=True)
@@ -23,14 +23,14 @@ def run_keepalive():
 
     interval_seconds = 600
     print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ✅ KEEPALIVE STARTED. Pinging {url} every 10 minutes.")
-    
+
     while True:
         try:
-            time.sleep(interval_seconds) 
-            ping_url = f"{url}/" 
+            time.sleep(interval_seconds)
+            ping_url = f"{url}/"
             response = requests.get(ping_url, timeout=10)
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 🔄 Ping sent. Status: {response.status_code}")
-            
+
         except Exception as e:
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ⚠️ KEEPALIVE FAILED: {e}")
 
@@ -82,11 +82,13 @@ def api_job(jobid):
 
 # =================================
 # THE JUGAAD: Adapt Flask (WSGI) to look like ASGI
-# The variable name "application" or "asgi_app" is what many ASGI runners look for by default.
+# The variable name "asgi_app" is what many ASGI runners look for by default.
 # =================================
 asgi_app = WsgiToAsgi(app)
 
 
 if __name__ == '__main__':
-    # debug mode fine for local/Grok/Colab testing
-    app.run(host='0.0.0.0', port=8787, debug=True)
+    # Run the ASGI-wrapped app locally so behavior matches production.
+    # Use reload=True for dev convenience.
+    import uvicorn
+    uvicorn.run("server:asgi_app", host="0.0.0.0", port=8787, reload=True)
