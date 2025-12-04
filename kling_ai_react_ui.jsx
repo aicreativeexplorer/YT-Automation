@@ -4,6 +4,7 @@ Backend contract:
   POST  ${API_BASE}/api/generate   -> { jobId }
   GET   ${API_BASE}/api/job/:jobId -> { jobId,status,progress,logs,outputUrl }
 */
+const ENGINE = "KAGGLE_LIVE";
 
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -11,6 +12,7 @@ import { CloudUpload, Play, Download, Settings, Trash2, FilePlus } from "lucide-
 
 // ---------- CONFIG ----------
 const API_BASE = "https://yt-automation-mt1d.onrender.com"; // <- your Render backend
+const ENGINE = "KAGGLE_LIVE"; // or "DUMMY" if you want local only
 
 // ---------- NETWORK / BACKEND HOOKS ----------
 async function realGenerate({ prompt, mode, duration, file }) {
@@ -18,6 +20,7 @@ async function realGenerate({ prompt, mode, duration, file }) {
   fd.append("prompt", prompt || "");
   fd.append("mode", mode || "TEXT");
   fd.append("duration", String(duration || 4));
+  fd.append("engine", ENGINE);  
   if (file) fd.append("file", file, file.name || "upload.mp4");
 
   const res = await fetch(`${API_BASE}/api/generate`, {
