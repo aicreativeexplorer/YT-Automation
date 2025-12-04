@@ -4,14 +4,16 @@ YT-Automation Backend (Advanced Version)
 ---------------------------------------
 - Flask + CORS
 - In-memory job store with thread-safety
-- Spawns background worker thread per job to run `generate_video.py`
+- Spawns background worker thread per job:
+    - DUMMY/LOCAL: run `generate_video.py`
+    - KAGGLE_LIVE: call external Colab/ngrok SVD API
 - API:
     GET  /                  -> health/info
     POST /api/generate      -> enqueue + start job, returns { jobId }
     GET  /api/job/<jobId>   -> job status, progress, logs, outputUrl
-    GET  /api/output/<jobId>-> streams generated mp4
+    GET  /api/output/<jobId>-> streams generated mp4 (local-only)
 
-Contract with generate_video.py:
+Contract with generate_video.py (for DUMMY/LOCAL):
 - Called as: python3 generate_video.py --prompt PROMPT --duration N --outdir WORKDIR [--seed_url URL]
 - Must print a final JSON line: {"output": "<path/to/video.mp4>"}
 """
@@ -26,6 +28,7 @@ from pathlib import Path
 
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+import requests  # NEW: for KAGGLE_LIVE / Colab calls
 
 # -------------------------------------------------------------------
 # App & config
@@ -34,7 +37,7 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)  # allow all origins; tighten later if needed
 
-# Where generated videos will be stored
+# Where generated videos will be stored (for local/dummy engine)
 WORKDIR = Path(os.path.abspath("work"))
 WORKDIR.mkdir(parents=True, exist_ok=True)
 
@@ -42,12 +45,16 @@ WORKDIR.mkdir(parents=True, exist_ok=True)
 jobs = {}          # job_id -> metadata dict
 jobs_lock = threading.Lock()
 
+# External live GPU API base (Colab/ngrok)
+# Example: https://something.ngrok-free.dev
+KAGGLE_LIVE_API_BASE = os.environ.get("KAGGLE_LIVE_API_BASE", "").rstrip("/") or None
+
 
 # -------------------------------------------------------------------
 # Helpers: job lifecycle
 # -------------------------------------------------------------------
 
-def job_init(job_id, prompt, mode, duration, seed_url=None):
+def job_init(job_id, prompt, mode, duration, seed_url=None, engine="DUMMY"):
     """Create initial metadata for a new job."""
     meta = {
         "jobId": job_id,
@@ -55,11 +62,12 @@ def job_init(job_id, prompt, mode, duration, seed_url=None):
         "mode": mode,
         "duration": duration,
         "seedUrl": seed_url,
+        "engine": engine,
         "status": "queued",          # queued | running | done | error
         "progress": 0,
         "logs": ["queued"],
-        "outputUrl": None,           # e.g. /api/output/<jobId>
-        "outputPath": None,          # absolute path on disk
+        "outputUrl": None,           # e.g. /api/output/<jobId> or Colab URL
+        "outputPath": None,          # absolute path on disk (local only)
         "createdAt": time.time(),
     }
     with jobs_lock:
@@ -88,17 +96,17 @@ def job_log(job_id, message):
 
 
 # -------------------------------------------------------------------
-# Worker: call generate_video.py
+# Worker: call generate_video.py (DUMMY/LOCAL engine)
 # -------------------------------------------------------------------
 
-def generate_call(job_id, prompt, mode, duration, seed_url):
+def generate_call_local(job_id, prompt, mode, duration, seed_url):
     """
-    Background worker function:
+    Background worker function for local/DUMMY engine:
     - Runs generate_video.py
     - Parses its output
     - Updates job state accordingly
     """
-    job_log(job_id, "starting generation")
+    job_log(job_id, "starting local generation")
     job_update(job_id, status="running", progress=5)
 
     cmd = [
@@ -177,6 +185,72 @@ def generate_call(job_id, prompt, mode, duration, seed_url):
 
 
 # -------------------------------------------------------------------
+# Worker: call external Colab/ngrok SVD API (KAGGLE_LIVE engine)
+# -------------------------------------------------------------------
+
+def generate_call_kaggle_live(job_id, prompt, mode, duration, seed_url):
+    """
+    Background worker for KAGGLE_LIVE engine:
+    - Calls external Colab/ngrok API: POST /api/generate
+    - Expects JSON: { ok, jobId, status, output_path? }
+    - Sets outputUrl to Colab /api/output/<jobId>
+    """
+    job_log(job_id, "starting KAGGLE_LIVE (Colab) generation")
+    job_update(job_id, status="running", progress=5)
+
+    if not KAGGLE_LIVE_API_BASE:
+        job_update(job_id, status="error", progress=0)
+        job_log(job_id, "KAGGLE_LIVE_API_BASE not configured")
+        return
+
+    payload = {
+        "id": job_id,
+        "prompt": prompt,
+        "duration": duration,
+        "mode": mode,
+    }
+
+    try:
+        resp = requests.post(
+            f"{KAGGLE_LIVE_API_BASE}/api/generate",
+            json=payload,
+            timeout=60 * 60,
+        )
+        text = resp.text
+        try:
+            data = resp.json()
+        except Exception as e:
+            job_update(job_id, status="error", progress=0)
+            job_log(job_id, f"invalid JSON from KAGGLE_LIVE: {repr(e)}; body={text[:500]}")
+            return
+
+        job_log(job_id, f"KAGGLE_LIVE response: {data}")
+
+        if not data.get("ok"):
+            job_update(job_id, status="error", progress=0)
+            job_log(job_id, f"KAGGLE_LIVE reported error: {data.get('error')}")
+            return
+
+        # Success: video is hosted on Colab side; we just point the UI there
+        out_url = f"{KAGGLE_LIVE_API_BASE}/api/output/{job_id}"
+        job_update(
+            job_id,
+            status=data.get("status", "done"),
+            progress=100,
+            outputPath=None,     # remote
+            outputUrl=out_url,
+        )
+        job_log(job_id, f"KAGGLE_LIVE finished. Output URL: {out_url}")
+
+    except requests.Timeout:
+        job_update(job_id, status="error", progress=0)
+        job_log(job_id, "KAGGLE_LIVE call timed out")
+    except Exception as e:
+        job_update(job_id, status="error", progress=0)
+        job_log(job_id, f"KAGGLE_LIVE exception: {repr(e)}")
+
+
+# -------------------------------------------------------------------
 # Routes
 # -------------------------------------------------------------------
 
@@ -204,6 +278,7 @@ def api_generate():
       - mode     (str, e.g. TEXT / IMAGE)
       - duration (int seconds)
       - seed_url (optional str)
+      - engine   (str, DUMMY | KAGGLE_LIVE)  <-- NEW
 
     Returns: { jobId }  (HTTP 202)
     """
@@ -212,6 +287,7 @@ def api_generate():
     prompt = data.get("prompt", "tiny glowing fox")
     mode = data.get("mode", "TEXT")
     seed_url = data.get("seed_url")
+    engine = (data.get("engine") or "DUMMY").upper()
 
     try:
         duration = int(data.get("duration") or 15)
@@ -222,15 +298,26 @@ def api_generate():
     duration = max(1, min(duration, 60))
 
     job_id = "job-" + uuid.uuid4().hex[:8]
-    job_init(job_id, prompt, mode, duration, seed_url=seed_url)
+    job_init(job_id, prompt, mode, duration, seed_url=seed_url, engine=engine)
 
-    # Kick off worker thread
-    t = threading.Thread(
-        target=generate_call,
-        args=(job_id, prompt, mode, duration, seed_url),
-        daemon=True,
-    )
-    t.start()
+    # Kick off worker thread based on engine
+    if engine == "KAGGLE_LIVE":
+        t = threading.Thread(
+            target=generate_call_kaggle_live,
+            args=(job_id, prompt, mode, duration, seed_url),
+            daemon=True,
+        )
+        job_log(job_id, "queued for KAGGLE_LIVE engine")
+        t.start()
+    else:
+        # Default: local dummy / generate_video.py
+        t = threading.Thread(
+            target=generate_call_local,
+            args=(job_id, prompt, mode, duration, seed_url),
+            daemon=True,
+        )
+        job_log(job_id, f"queued for LOCAL engine ({engine})")
+        t.start()
 
     return jsonify({"jobId": job_id}), 202
 
@@ -246,7 +333,7 @@ def api_job(job_id):
       "status": "queued|running|done|error",
       "progress": 0-100,
       "logs": [...],
-      "outputUrl": "/api/output/job-xxxx" | null,
+      "outputUrl": "/api/output/job-xxxx" | "https://colab.../api/output/..." | null,
       ...
     }
     """
@@ -265,8 +352,8 @@ def api_job(job_id):
 @app.route("/api/output/<job_id>", methods=["GET"])
 def api_output(job_id):
     """
-    Stream the generated mp4 for this job.
-    Frontend should use job.outputUrl, e.g. `${API_BASE}${outputUrl}`.
+    Stream the generated mp4 for LOCAL jobs.
+    For KAGGLE_LIVE jobs, the UI should use the remote URL directly.
     """
     with jobs_lock:
         meta = jobs.get(job_id)
@@ -276,7 +363,7 @@ def api_output(job_id):
 
     output_path = meta.get("outputPath")
     if not output_path:
-        return jsonify({"error": "output_not_ready"}), 404
+        return jsonify({"error": "output_not_ready_or_remote"}), 404
 
     p = Path(output_path)
     if not p.exists():
