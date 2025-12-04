@@ -20,7 +20,7 @@ async function realGenerate({ prompt, mode, duration, file }) {
   fd.append("prompt", prompt || "");
   fd.append("mode", mode || "TEXT");
   fd.append("duration", String(duration || 4));
-  fd.append("engine", ENGINE);  
+  fd.append("engine", "KAGGLE_LIVE"); // 🔥 route via Colab SVD
   if (file) fd.append("file", file, file.name || "upload.mp4");
 
   const res = await fetch(`${API_BASE}/api/generate`, {
@@ -34,6 +34,7 @@ async function realGenerate({ prompt, mode, duration, file }) {
   }
   return res.json(); // { jobId }
 }
+
 
 // Poll job status: calls onUpdate({ status, progress, logs, outputUrl })
 function pollJob(jobId, onUpdate, onError, intervalMs = 1500) {
