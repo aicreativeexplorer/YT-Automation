@@ -17,7 +17,7 @@ Contract with generate_video.py (for DUMMY/LOCAL):
 - Called as: python3 generate_video.py --prompt PROMPT --duration N --outdir WORKDIR [--seed_url URL]
 - Must print a final JSON line: {"output": "<path/to/video.mp4>"}
 """
-
+import requests  # NEW
 import os
 import json
 import uuid
@@ -380,3 +380,4 @@ if __name__ == "__main__":
     # Render sets PORT env; default to 8787 for local dev
     port = int(os.environ.get("PORT", "8787"))
     app.run(host="0.0.0.0", port=port, debug=False)
+
