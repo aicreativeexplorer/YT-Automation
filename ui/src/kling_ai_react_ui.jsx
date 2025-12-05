@@ -10,7 +10,7 @@ import { CloudUpload, Play, Download, Settings, Trash2, FilePlus } from "lucide-
 
 // ---------- CONFIG ----------
 const API_BASE = "https://yt-automation-mt1d.onrender.com"; // <- your Render backend
-const ENGINE = "KAGGLE_LIVE"; // or "DUMMY" if you want local only
+const ENGINE = "LOCAL"; // or "DUMMY" if you want local only
 
 // ---------- NETWORK / BACKEND HOOKS ----------
 async function realGenerate({ prompt, mode, duration }) {
