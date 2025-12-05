@@ -321,7 +321,7 @@ def root():
 
 @app.route("/api/generate", methods=["POST"])
 def api_generate():
-    data = request.json or request.form.to_dict()
+    data = (request.get_json(silent=True) or request.form.to_dict() or {})
 
     prompt = data.get("prompt", "tiny glowing fox")
     mode = data.get("mode", "TEXT")
@@ -349,7 +349,7 @@ def api_generate():
         )
     else:
         t = threading.Thread(
-            target=generate_call,
+            target=generate_call_local,
             args=(job_id, prompt, mode, duration, seed_url),
             daemon=True,
         )
@@ -415,6 +415,7 @@ if __name__ == "__main__":
     # Render sets PORT env; default to 8787 for local dev
     port = int(os.environ.get("PORT", "8787"))
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
 
 
