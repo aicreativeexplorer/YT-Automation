@@ -182,7 +182,7 @@ def generate_call_local(job_id, prompt, mode, duration, seed_url):
         job_update(job_id, status="error", progress=0)
         job_log(job_id, f"exception: {repr(e)}")
 
-    def generate_call_kaggle_live(job_id, prompt, mode, duration, seed_url):
+def generate_call_kaggle_live(job_id, prompt, mode, duration, seed_url):
     """
     Worker that forwards the job to Colab SVD API (KAGGLE_LIVE_API_BASE).
     - Calls:  POST {BASE}/api/generate  with JSON { id, prompt, duration, mode }
@@ -415,5 +415,6 @@ if __name__ == "__main__":
     # Render sets PORT env; default to 8787 for local dev
     port = int(os.environ.get("PORT", "8787"))
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
 
