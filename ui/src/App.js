@@ -1,4 +1,8 @@
+import React from "react";
 import KlingAIUI from "./kling_ai_react_ui";
-export default function App() {
+
+function App() {
   return <KlingAIUI />;
 }
+
+export default App;
