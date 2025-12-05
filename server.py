@@ -298,10 +298,10 @@ def generate_call_kaggle_live(job_id, prompt, mode, duration, seed_url):
         job_update(job_id, status="error", progress=0)
         job_log(job_id, "KAGGLE_LIVE call timed out")
     except Exception as e:
-        job_update(job_id, status="error", progress=0)
-        job_log(job_id, f"KAGGLE_LIVE exception: {repr(e)}")
+       job_log(job_id, f"KAGGLE_LIVE exception: {repr(e)} → Falling back to LOCAL")
+    return generate_call_local(job_id, prompt, mode, duration, seed_url)
 
-
+     
 # -------------------------------------------------------------------
 # Routes
 # -------------------------------------------------------------------
@@ -334,8 +334,18 @@ def api_generate():
 
     duration = max(1, min(duration, 60))
 
-    # NEW: engine flag from UI
-    engine = data.get("engine", "LOCAL").upper()  # LOCAL | KAGGLE_LIVE | ...
+    # NEW: AUTO engine flag from UI
+    raw_engine = data.get("engine", "").upper()
+
+# AUTO = smart routing between GPU and CPU
+    if raw_engine in ["", "AUTO"]:
+    if KAGGLE_LIVE_API_BASE:
+        engine = "KAGGLE_LIVE"
+    else:
+        engine = "LOCAL"
+    else:
+        engine = raw_engine
+
 
     job_id = "job-" + uuid.uuid4().hex[:8]
     job_init(job_id, prompt, mode, duration, seed_url=seed_url, engine=engine)
@@ -415,6 +425,7 @@ if __name__ == "__main__":
     # Render sets PORT env; default to 8787 for local dev
     port = int(os.environ.get("PORT", "8787"))
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
 
 
