@@ -4,10 +4,9 @@ Backend contract:
   POST  ${API_BASE}/api/generate   -> { jobId }
   GET   ${API_BASE}/api/job/:jobId -> { jobId,status,progress,logs,outputUrl }
 */
-
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { CloudUpload, Play, Download, Settings, Trash2 } from "lucide-react";
+import { CloudUpload, Play, Download, Settings, Trash2, FilePlus } from "lucide-react";
 
 // ---------- CONFIG ----------
 const API_BASE = "https://yt-automation-mt1d.onrender.com"; // <- your Render backend
@@ -18,8 +17,8 @@ async function realGenerate({ prompt, mode, duration, file }) {
   const fd = new FormData();
   fd.append("prompt", prompt || "");
   fd.append("mode", mode || "TEXT");
-  fd.append("duration", String(duration || 10)); // default 10s
-  fd.append("engine", ENGINE);
+  fd.append("duration", String(duration || 4));
+  fd.append("engine", ENGINE);  
   if (file) fd.append("file", file, file.name || "upload.mp4");
 
   const res = await fetch(`${API_BASE}/api/generate`, {
@@ -87,13 +86,13 @@ const defaultPresets = [
     id: "p1",
     name: "Cute Tiny Animal",
     prompt: "tiny playful kitten in a wool sweater, cinematic closeup",
-    duration: 10,
+    duration: 15,
   },
   {
     id: "p2",
     name: "Futuristic City",
     prompt: "neon cyberpunk alley, rain, cinematic 3d",
-    duration: 10,
+    duration: 20,
   },
   {
     id: "p3",
@@ -106,7 +105,7 @@ const defaultPresets = [
 export default function KlingAIUI() {
   const [mode, setMode] = useState("TEXT");
   const [prompt, setPrompt] = useState("woolen cat playing");
-  const [duration, setDuration] = useState(10);
+  const [duration, setDuration] = useState(15);
   const [presets] = useState(defaultPresets);
   const [jobs, setJobs] = useState([]); // { jobId, prompt, progress, status, outputUrl, logs }
   const [selectedJob, setSelectedJob] = useState(null);
@@ -408,8 +407,7 @@ export default function KlingAIUI() {
                         <div className="text-center">
                           <div className="mb-2 text-sm">No generated output yet</div>
                           <div className="text-xs">
-                            Enter a prompt and hit{" "}
-                            <span className="font-semibold">Generate</span>.
+                            Enter a prompt and hit <span className="font-semibold">Generate</span>.
                           </div>
                         </div>
                       </motion.div>
@@ -481,7 +479,7 @@ export default function KlingAIUI() {
                       key={j.jobId}
                       className="p-2 border-b border-slate-800 last:border-b-0"
                     >
-                      <div className="flex justify_between items-center">
+                      <div className="flex justify-between items-center">
                         <div>
                           <div className="font-medium text-xs">{j.jobId}</div>
                           <div className="text-[11px] text-slate-400 truncate max-w-[180px]">
