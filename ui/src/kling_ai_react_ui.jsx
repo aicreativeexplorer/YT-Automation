@@ -13,24 +13,28 @@ const API_BASE = "https://yt-automation-mt1d.onrender.com"; // <- your Render ba
 const ENGINE = "KAGGLE_LIVE"; // or "DUMMY" if you want local only
 
 // ---------- NETWORK / BACKEND HOOKS ----------
-async function realGenerate({ prompt, mode, duration, file }) {
-  const fd = new FormData();
-  fd.append("prompt", prompt || "");
-  fd.append("mode", mode || "TEXT");
-  fd.append("duration", String(duration || 4));
-  fd.append("engine", ENGINE);  
-  if (file) fd.append("file", file, file.name || "upload.mp4");
+async function realGenerate({ prompt, mode, duration }) {
+  const body = {
+    prompt: prompt || "",
+    mode: mode || "TEXT",
+    duration: duration || 15,
+    engine: ENGINE,
+  };
 
   const res = await fetch(`${API_BASE}/api/generate`, {
     method: "POST",
-    body: fd,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`Generate error: ${res.status} ${txt}`);
   }
-  return res.json(); // { jobId }
+
+  return res.json();
 }
 
 // Poll job status: calls onUpdate({ status, progress, logs, outputUrl })
@@ -121,12 +125,12 @@ export default function KlingAIUI() {
     setIsGenerating(true);
 
     let fileObj = null;
-    if (uploads && uploads.length > 0 && uploads[0].file instanceof File) {
+    /* if (uploads && uploads.length > 0 && uploads[0].file instanceof File) {
       fileObj = uploads[0].file;
-    }
+    }*/ 
 
     try {
-      const json = await realGenerate({ prompt, mode, duration, file: fileObj });
+      const json = await realGenerate({ prompt, mode, duration });
       if (!json || !json.jobId) throw new Error("No jobId returned from backend");
 
       const jobId = json.jobId;
