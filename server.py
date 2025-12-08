@@ -5,7 +5,7 @@ YT-Automation Backend (Advanced Version)
 - Flask + CORS
 - In-memory job store with thread-safety
 - Spawns background worker thread per job:
-    - DUMMY/LOCAL: run `generate_video.py`
+    - LOCAL: run `generate_video.py`
     - KAGGLE_LIVE: call external Colab/ngrok SVD API
 - API:
     GET  /                  -> health/info
@@ -13,11 +13,11 @@ YT-Automation Backend (Advanced Version)
     GET  /api/job/<jobId>   -> job status, progress, logs, outputUrl
     GET  /api/output/<jobId>-> streams generated mp4 (local-only)
 
-Contract with generate_video.py (for DUMMY/LOCAL):
+Contract with generate_video.py (for LOCAL):
 - Called as: python3 generate_video.py --prompt PROMPT --duration N --outdir WORKDIR [--seed_url URL]
 - Must print a final JSON line: {"output": "<path/to/video.mp4>"}
 """
-import requests  # NEW
+
 import os
 import json
 import uuid
@@ -26,9 +26,9 @@ import threading
 import subprocess
 from pathlib import Path
 
+import requests
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-import requests  # NEW: for KAGGLE_LIVE / Colab calls
 
 # -------------------------------------------------------------------
 # App & config
@@ -37,7 +37,7 @@ import requests  # NEW: for KAGGLE_LIVE / Colab calls
 app = Flask(__name__)
 CORS(app)  # allow all origins; tighten later if needed
 
-# Where generated videos will be stored (for local/dummy engine)
+# Where generated videos will be stored (for local engine)
 WORKDIR = Path(os.path.abspath("work"))
 WORKDIR.mkdir(parents=True, exist_ok=True)
 
@@ -48,6 +48,11 @@ jobs_lock = threading.Lock()
 # External live GPU API base (Colab/ngrok)
 # Example: https://something.ngrok-free.dev
 KAGGLE_LIVE_API_BASE = os.environ.get("KAGGLE_LIVE_API_BASE", "").rstrip("/") or None
+
+
+# -------------------------------------------------------------------
+# Engine selector
+# -------------------------------------------------------------------
 
 def smart_select_engine():
     """
@@ -63,7 +68,7 @@ def smart_select_engine():
                 if data.get("ok") and data.get("gpu"):
                     return "KAGGLE_LIVE"
         except Exception:
-            # Colab / ngrok is dead or invalid → ignore, fallback to LOCAL
+            # Colab / tunnel is dead or invalid → fallback to LOCAL
             pass
 
     return "LOCAL"
@@ -81,7 +86,7 @@ def job_init(job_id, prompt, mode, duration, seed_url=None, engine="LOCAL"):
         "mode": mode,
         "duration": duration,
         "seedUrl": seed_url,
-        "engine": engine,          # NEW
+        "engine": engine,          # LOCAL | KAGGLE_LIVE
         "status": "queued",        # queued | running | done | error
         "progress": 0,
         "logs": ["queued"],
@@ -92,6 +97,7 @@ def job_init(job_id, prompt, mode, duration, seed_url=None, engine="LOCAL"):
     with jobs_lock:
         jobs[job_id] = meta
     return meta
+
 
 def job_update(job_id, **fields):
     """Thread-safe partial update of a job."""
@@ -114,12 +120,12 @@ def job_log(job_id, message):
 
 
 # -------------------------------------------------------------------
-# Worker: call generate_video.py (DUMMY/LOCAL engine)
+# LOCAL worker: call generate_video.py
 # -------------------------------------------------------------------
 
 def generate_call_local(job_id, prompt, mode, duration, seed_url):
     """
-    Background worker function for local/DUMMY engine:
+    Background worker function for LOCAL engine:
     - Runs generate_video.py
     - Parses its output
     - Updates job state accordingly
@@ -201,69 +207,16 @@ def generate_call_local(job_id, prompt, mode, duration, seed_url):
         job_update(job_id, status="error", progress=0)
         job_log(job_id, f"exception: {repr(e)}")
 
-def generate_call_kaggle_live(job_id, prompt, mode, duration, seed_url):
-    """
-    Worker that forwards the job to Colab SVD API (KAGGLE_LIVE_API_BASE).
-    - Calls:  POST {BASE}/api/generate  with JSON { id, prompt, duration, mode }
-    - Expects Colab to create /api/output/<jobId> mp4.
-    """
-    if not KAGGLE_LIVE_API_BASE:
-        job_update(job_id, status="error", progress=0)
-        job_log(job_id, "KAGGLE_LIVE_API_BASE not set on server.")
-        return
-
-    job_log(job_id, f"forwarding to Colab SVD at {KAGGLE_LIVE_API_BASE}")
-    job_update(job_id, status="running", progress=10)
-
-    try:
-        url = f"{KAGGLE_LIVE_API_BASE}/api/generate"
-        payload = {
-            "id": job_id,
-            "prompt": prompt,
-            "duration": int(duration),
-            "mode": (mode or "TEXT").upper(),
-        }
-        job_log(job_id, f"POST {url} with {payload}")
-
-        resp = requests.post(url, json=payload, timeout=60 * 60)
-        job_log(job_id, f"Colab response: {resp.status_code}")
-
-        try:
-            data = resp.json()
-        except Exception:
-            data = {"raw": resp.text[:500]}
-
-        if resp.status_code != 200 or not data.get("ok"):
-            job_update(job_id, status="error", progress=0)
-            job_log(job_id, f"Colab error: {data}")
-            return
-
-        # Colab saves file as /content/generated_videos/{job_id}_svd.mp4
-        out_url = f"{KAGGLE_LIVE_API_BASE}/api/output/{job_id}"
-
-        job_update(
-            job_id,
-            status="done",
-            progress=100,
-            outputPath=None,          # file lives on Colab, not here
-            outputUrl=out_url,        # FULL URL, not relative
-        )
-        job_log(job_id, f"finished via Colab: {out_url}")
-
-    except Exception as e:
-        job_update(job_id, status="error", progress=0)
-        job_log(job_id, f"KAGGLE_LIVE exception: {repr(e)}")
-
 
 # -------------------------------------------------------------------
-# ⭐ FINAL GOD-MODE GPU WORKER (WITH AUTO FALLBACK)
+# KAGGLE_LIVE worker: Colab GPU with auto-fallback
 # -------------------------------------------------------------------
 
 def generate_call_kaggle_live(job_id, prompt, mode, duration, seed_url):
     """
     GPU worker with auto-fallback:
     - Try Colab GPU API
-    - If Colab returns HTML / error / offline → fallback to LOCAL CPU
+    - If Colab returns HTML / error / offline → fallback to LOCAL engine
     """
     job_log(job_id, "starting KAGGLE_LIVE (Colab) generation")
     job_update(job_id, status="running", progress=5)
@@ -275,8 +228,9 @@ def generate_call_kaggle_live(job_id, prompt, mode, duration, seed_url):
     payload = {
         "id": job_id,
         "prompt": prompt,
-        "duration": duration,
-        "mode": mode,
+        "duration": int(duration),
+        "mode": (mode or "TEXT").upper(),
+        "seed_url": seed_url,
     }
 
     try:
@@ -305,7 +259,7 @@ def generate_call_kaggle_live(job_id, prompt, mode, duration, seed_url):
             job_log(job_id, "GPU FAILED → Falling back to LOCAL engine")
             return generate_call_local(job_id, prompt, mode, duration, seed_url)
 
-        # GPU SUCCESS
+        # GPU SUCCESS – video is hosted remotely
         out_url = f"{KAGGLE_LIVE_API_BASE}/api/output/{job_id}"
         job_update(
             job_id,
@@ -321,7 +275,7 @@ def generate_call_kaggle_live(job_id, prompt, mode, duration, seed_url):
         job_log(job_id, "GPU FAILED → Falling back to LOCAL engine")
         return generate_call_local(job_id, prompt, mode, duration, seed_url)
 
-     
+
 # -------------------------------------------------------------------
 # Routes
 # -------------------------------------------------------------------
@@ -339,10 +293,8 @@ def root():
         ],
     })
 
+
 @app.route("/api/generate", methods=["POST"])
-
-data = (request.get_json(silent=True) or request.form.to_dict() or {})
-
 def api_generate():
     data = (request.get_json(silent=True) or request.form.to_dict() or {})
 
@@ -352,22 +304,22 @@ def api_generate():
 
     try:
         duration = int(data.get("duration") or 15)
-    except:
+    except Exception:
         duration = 15
 
-    # ⭐ NEW GOD-MODE LOGIC HERE
-    raw_engine = (data.get("engine") or "").upper()
+    # Keep duration in a sane range
+    duration = max(1, min(duration, 60))
 
+    # Engine from UI
+    raw_engine = (data.get("engine") or "").upper()
     if raw_engine in ["", "AUTO"]:
         engine = smart_select_engine()
     else:
         engine = raw_engine
 
-    job_log(job_id, f"ENGINE selected: {engine}")
-
-
     job_id = "job-" + uuid.uuid4().hex[:8]
     job_init(job_id, prompt, mode, duration, seed_url=seed_url, engine=engine)
+    job_log(job_id, f"ENGINE selected: {engine}")
 
     # Pick worker based on engine
     if engine == "KAGGLE_LIVE":
@@ -386,20 +338,11 @@ def api_generate():
     t.start()
     return jsonify({"jobId": job_id}), 202
 
+
 @app.route("/api/job/<job_id>", methods=["GET"])
 def api_job(job_id):
     """
     Poll job status.
-
-    Returns (example):
-    {
-      "jobId": "...",
-      "status": "queued|running|done|error",
-      "progress": 0-100,
-      "logs": [...],
-      "outputUrl": "/api/output/job-xxxx" | "https://colab.../api/output/..." | null,
-      ...
-    }
     """
     with jobs_lock:
         meta = jobs.get(job_id)
@@ -417,7 +360,7 @@ def api_job(job_id):
 def api_output(job_id):
     """
     Stream the generated mp4 for LOCAL jobs.
-    For KAGGLE_LIVE jobs, the UI should use the remote URL directly.
+    For KAGGLE_LIVE jobs, the UI should use the remote outputUrl directly.
     """
     with jobs_lock:
         meta = jobs.get(job_id)
@@ -444,9 +387,3 @@ if __name__ == "__main__":
     # Render sets PORT env; default to 8787 for local dev
     port = int(os.environ.get("PORT", "8787"))
     app.run(host="0.0.0.0", port=port, debug=False)
-
-
-
-
-
-
